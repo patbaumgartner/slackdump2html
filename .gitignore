@@ -1,12 +1,33 @@
-/*.exe
+# Python artifacts
 **/__pycache__
-/data
-/out
-/venv
-/.env
-/.idea
-/.gitignore.bak
-/.vscode
-/secrets.txt
-/slackdump
-/testdata/
+**/*.egg-info
+.coverage
+.coverage.*
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local IDE and env
+.env
+.idea/
+.vscode/
+
+# Project outputs and local data
+data/
+out/
+cov.xml
+C03HQM5DE*
+C2R198BRC*
+channels-T*.txt
+users-T*.txt
+
+# Local helper binaries and secrets
+*.bak
+*.exe
+.gitignore.bak
+app.slack.com_cookies.txt
+secrets.txt
+slackdump
+slackdump_Linux_x86_64.tar.gz
