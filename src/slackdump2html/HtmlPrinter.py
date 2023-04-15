@@ -1,21 +1,28 @@
+import importlib.resources as pkg_resources
 import os
 import re
 from datetime import datetime
+from html import escape
 
 import emoji
 
-from src.SlackDataCleaner import SlackDataCleaner
-from src.SlackDumpReader import SlackData, SlackMessage, SlackThreadMessage
+from slackdump2html.SlackDataCleaner import SlackDataCleaner
+from slackdump2html.SlackDumpReader import SlackData, SlackMessage, SlackThreadMessage
+
+from . import styles
 
 
 class HtmlPrinter:
     slack_data: SlackData
-    standard_emojis: dict[str, str] = dict()
-    used_custom_emojis: set[str] = set()
-    data_cleaner = SlackDataCleaner()
+    channel_id: str
+    used_custom_emojis: set[str]
+    data_cleaner: SlackDataCleaner
 
-    def __init__(self, slack_data: SlackData):
+    def __init__(self, slack_data: SlackData, channel_id: str):
         self.slack_data = slack_data
+        self.channel_id = channel_id
+        self.used_custom_emojis = set()
+        self.data_cleaner = SlackDataCleaner()
 
     def print(self):
         html1 = "<!DOCTYPE html>\n"
@@ -38,8 +45,7 @@ class HtmlPrinter:
 
     def read_css_file(self) -> str:
         html = '        <style type="text/css">\n'
-        with open("src/style/style.css") as file:
-            html += file.read()
+        html += pkg_resources.read_text(styles, "style.css")
         html += "        </style>\n"
         return html
 
@@ -61,28 +67,50 @@ class HtmlPrinter:
         return html
 
     def print_date_block(self, date: str) -> str:
-        return f'        <div class="date-block"><span class="date-block-content">{date}</span></div>\n'
+        return (
+            '        <div class="date-block"><span class="date-block-content">'
+            f"{date}</span></div>\n"
+        )
 
     def print_message(self, message: SlackMessage) -> str:
         html = '        <div class="message-container">\n'
-        html += self.print_user_image(message.user)
+        html += self.print_user_image(message.user, message.avatar_url)
         html += '            <p class="meta">\n'
-        html += f'                <span class="author">{message.user}</span>\n'
+        html += f'                <span class="author">{escape(message.user)}</span>\n'
+        if message.edited:
+            html += '                <span class="edited-label">edited</span>\n'
+        html += self.print_message_badges(
+            message.subtype,
+            message.metadata_event_type,
+            message.subscribed,
+            message.last_read,
+            message.upload,
+            message.team_id,
+            message.client_msg_id,
+        )
         html += f'                <span class="date">{self.to_time(message.date)}</span>\n'
         html += "            </p>\n"
         html += f'            <p class="message">{self.format_message(message.text)}</p>\n'
-        html += self.print_reactions(message.reactions)
+        html += self.print_reactions(message.reactions, message.reaction_users)
         html += self.print_replies(message)
         html += "        </div>\n"
         return html
 
-    def print_user_image(self, user: str) -> str:
+    def print_user_image(self, user: str, avatar_url: str | None = None) -> str:
+        if avatar_url:
+            return (
+                '            <div class="user-image user-avatar">'
+                f'<img src="{escape(avatar_url, quote=True)}" alt="{escape(user)}" '
+                'class="user-avatar-img"></div>\n'
+            )
         if " " in user:
             parts = user.split(" ")
             name = parts[0][0].upper() + parts[1][0].upper()
         else:
             name = user[0].upper()
-        return f'            <div class="user-image color{self.calc_color_num(user)}">{name}</div>\n'
+        return (
+            f'            <div class="user-image color{self.calc_color_num(user)}">{name}</div>\n'
+        )
 
     def calc_color_num(self, user: str) -> int:
         letter_sum = 0
@@ -90,7 +118,7 @@ class HtmlPrinter:
             letter_sum += ord(letter)
         return letter_sum % 15
 
-    def format_message(self, text: str) -> str:        
+    def format_message(self, text: str) -> str:
         text = text.replace("<!here>", '<span class="user-mention">here</span>')
         text = text.replace("<!channel>", '<span class="user-mention">channel</span>')
         text = re.sub(r"<(http.*?)\|(.*?)>", self.create_html_url_with_alias, text)
@@ -109,11 +137,31 @@ class HtmlPrinter:
 
     def create_html_url_with_alias(self, match_obj):
         if match_obj.group(1) is not None and match_obj.group(2) is not None:
-            return f'<a href="{match_obj.group(1)}">{match_obj.group(2)}</a>'
+            url = match_obj.group(1)
+            alias = match_obj.group(2)
+            if self.is_image_url(url):
+                safe_url = escape(url, quote=True)
+                safe_alias = escape(alias)
+                return (
+                    f'<a href="{safe_url}">{safe_alias}</a>'
+                    f'<br><img src="{safe_url}" alt="{safe_alias}" class="shared-image-img">'
+                )
+            return f'<a href="{url}">{alias}</a>'
 
     def create_html_url(self, match_obj):
         if match_obj.group(1) is not None:
-            return f'<a href="{match_obj.group(1)}">{match_obj.group(1)}</a>'
+            url = match_obj.group(1)
+            if self.is_image_url(url):
+                safe_url = escape(url, quote=True)
+                return (
+                    f'<a href="{safe_url}">{safe_url}</a>'
+                    f'<br><img src="{safe_url}" alt="Shared image" class="shared-image-img">'
+                )
+            return f'<a href="{url}">{url}</a>'
+
+    def is_image_url(self, url: str) -> bool:
+        lowered = url.lower().split("?", 1)[0]
+        return lowered.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
 
     def create_html_img(self, match_obj):
         if match_obj.group(1) is not None:
@@ -150,10 +198,16 @@ class HtmlPrinter:
         emoji_name = match_obj.group(1)
         skin_tone = match_obj.group(2)
         if emoji_name is not None and skin_tone is not None:
-            cleaned_emoji_name = self.data_cleaner.replace_emoji_name_with_skin_tone(emoji_name, int(skin_tone))
+            cleaned_emoji_name = self.data_cleaner.replace_emoji_name_with_skin_tone(
+                emoji_name, int(skin_tone)
+            )
             return self.get_custom_emoji_html(cleaned_emoji_name)
 
-    def print_reactions(self, reactions: dict[str, int]) -> str:
+    def print_reactions(
+        self,
+        reactions: dict[str, int],
+        reaction_users: dict[str, list[str]],
+    ) -> str:
         html = ""
         if len(reactions) > 0:
             html += '            <ul class="reactions">\n'
@@ -161,7 +215,15 @@ class HtmlPrinter:
                 emoji_name = self.get_custom_emoji_html(reaction[0])
                 if emoji_name.startswith(":"):
                     print(f"Couldn't translate emoji {emoji_name}")
-                html += f'                <li title="{reaction[0]}">{emoji_name} {reaction[1]}</li>\n'
+                users = reaction_users.get(reaction[0], [])
+                users_display = [self.data_cleaner.get_user_name(user) for user in users]
+                users_title = (
+                    f"Liked by: {', '.join(users_display)}" if users_display else reaction[0]
+                )
+                html += (
+                    f'                <li title="{escape(users_title, quote=True)}">{emoji_name} '
+                    f"{reaction[1]}</li>\n"
+                )
             html += "            </ul>\n"
         return html
 
@@ -170,7 +232,10 @@ class HtmlPrinter:
             self.used_custom_emojis.add(emoji_name)
             return f'<i class="emoji emoji-{emoji_name}"></i>'
         else:
-            return emoji.emojize(f":{self.data_cleaner.replace_emoji_name(emoji_name)}:", language="alias")
+            return emoji.emojize(
+                f":{self.data_cleaner.replace_emoji_name(emoji_name)}:",
+                language="alias",
+            )
 
     def print_replies(self, message: SlackMessage) -> str:
         html = ""
@@ -184,13 +249,23 @@ class HtmlPrinter:
 
     def print_reply(self, reply: SlackThreadMessage) -> str:
         html = '		        <div class="reply">\n'
-        html += self.print_user_image(reply.user)
+        html += self.print_user_image(reply.user, reply.avatar_url)
         html += '		            <p class="meta">\n'
-        html += f'		                <span class="author">{reply.user}</span>\n'
-        html += f'		                <span class="date">{self.to_datetime(reply.date)}</span>\n'
+        html += f'		                <span class="author">{escape(reply.user)}</span>\n'
+        if reply.edited:
+            html += '                        <span class="edited-label">edited</span>\n'
+        html += self.print_message_badges(
+            reply.subtype,
+            reply.metadata_event_type,
+            team_id=reply.team_id,
+            client_msg_id=reply.client_msg_id,
+        )
+        html += (
+            f'		                <span class="date">{self.to_datetime(reply.date)}</span>\n'
+        )
         html += "		            </p>\n"
         html += f'		            <p class="message">{self.format_message(reply.text)}</p>\n'
-        html += self.print_reactions(reply.reactions)
+        html += self.print_reactions(reply.reactions, reply.reaction_users)
         html += "		        </div>\n"
         return html
 
@@ -201,6 +276,48 @@ class HtmlPrinter:
             html += f'          background-image: url("data:{self.slack_data.emojis[emoji_name]}");'
             html += "        }\n"
         html += "      </style>\n"
+        return html
+
+    def print_message_badges(
+        self,
+        subtype: str | None,
+        metadata_event_type: str | None,
+        subscribed: bool = False,
+        last_read: datetime | None = None,
+        upload: bool = False,
+        team_id: str | None = None,
+        client_msg_id: str | None = None,
+    ) -> str:
+        html = ""
+        if subtype:
+            html += (
+                f'                <span class="message-badge subtype-badge">'
+                f"{escape(subtype)}</span>\n"
+            )
+        if metadata_event_type:
+            html += (
+                f'                <span class="message-badge metadata-badge">'
+                f"{escape(metadata_event_type)}</span>\n"
+            )
+        if subscribed:
+            html += '                <span class="message-badge state-badge">subscribed</span>\n'
+        if last_read is not None:
+            html += (
+                f'                <span class="message-badge state-badge">'
+                f"last read {self.to_datetime(last_read)}</span>\n"
+            )
+        if upload:
+            html += '                <span class="message-badge state-badge">upload</span>\n'
+        if team_id:
+            html += (
+                f'                <span class="message-badge technical-badge">'
+                f"team {escape(team_id)}</span>\n"
+            )
+        if client_msg_id:
+            html += (
+                f'                <span class="message-badge technical-badge">'
+                f"client {escape(client_msg_id)}</span>\n"
+            )
         return html
 
     @staticmethod
@@ -216,10 +333,8 @@ class HtmlPrinter:
         return date.strftime("%d.%m.%Y %H:%M:%S")
 
     def write_out_file(self, html: str):
-        if not os.path.exists("out"):
-            os.makedirs("out")
+        os.makedirs("out", exist_ok=True)
         file_name = f"out/{self.slack_data.channel_name}.html"
-        html_file = open(file_name, "w", encoding="utf-8")
-        html_file.write(html)
-        html_file.close()
+        with open(file_name, "w", encoding="utf-8") as html_file:
+            html_file.write(html)
         print(f"{file_name} successfully written")
