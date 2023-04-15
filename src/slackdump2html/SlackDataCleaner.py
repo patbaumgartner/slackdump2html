@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from src.data_structures import SlackData, ChannelType
+from slackdump2html.data_structures import SlackData, ChannelType
 
 
 class SlackDataCleaner:
