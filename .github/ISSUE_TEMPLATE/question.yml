@@ -1,0 +1,16 @@
+name: Question
+description: Ask for usage help or clarification
+labels: [question]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Ask clearly and include context.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Commands, config, and what you already tried.
