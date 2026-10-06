@@ -9,7 +9,6 @@ cmd="$(slackdump_cmd)"
 mkdir -p "${REPO_ROOT}/data"
 tmp_file="$(mktemp)"
 tmp_json="$(mktemp)"
-trap 'rm -f "${tmp_file}"' EXIT
 trap 'rm -f "${tmp_file}" "${tmp_json}"' EXIT
 
 log "Exporting users to data/users.txt"

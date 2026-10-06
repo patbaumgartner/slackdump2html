@@ -70,10 +70,7 @@ for channel_id in "${channel_ids[@]}"; do
     tmp_out="${tmp_root}/export"
 
     if "${cmd}" dump -load-env -o "${tmp_out}" "${channel_id}"; then
-      source_file="$(find "${tmp_out}" -type f -name "${channel_id}.json" | head -n 1)"
-      if [[ -z "${source_file}" ]]; then
-        source_file="$(find "${tmp_out}" -type f -name '*.json' | head -n 1)"
-      fi
+      source_file="$(find_export_file "${tmp_out}" "${channel_id}")"
 
       if [[ -n "${source_file}" ]]; then
         cp "${source_file}" "${target_file}"

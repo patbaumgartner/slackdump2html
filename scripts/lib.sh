@@ -76,3 +76,17 @@ slackdump_cmd() {
   ensure_slackdump
   printf '%s' "${SLACKDUMP_BIN}"
 }
+
+find_export_file() {
+  local export_dir="$1"
+  local channel_id="$2"
+  local source_file
+
+  source_file="$(find "${export_dir}" -type f -name "${channel_id}.json" -print | sed -n '1p')"
+  if [[ -n "${source_file}" ]]; then
+    printf '%s\n' "${source_file}"
+    return
+  fi
+
+  find "${export_dir}" -type f -name '*.json' -print | sed -n '1p'
+}

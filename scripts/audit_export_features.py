@@ -89,14 +89,17 @@ class FeatureAudit:
                 self.gap_signals["non_dict_message"] += 1
                 self._remember_example("non_dict_message", f"{export_file}#{index}")
                 continue
-            self.scan_message(message, f"{export_file.name}#msg:{index}", is_reply=False)
+            self.scan_message(message, f"{export_file.name}#msg:{index}")
 
-    def scan_message(self, message: dict[str, Any], location: str, *, is_reply: bool) -> None:
-        if is_reply:
-            self.replies_scanned += 1
-        else:
-            self.messages_scanned += 1
+    def scan_message(self, message: dict[str, Any], location: str) -> None:
+        self.messages_scanned += 1
+        self._scan_message_content(message, location)
 
+    def scan_reply(self, message: dict[str, Any], location: str) -> None:
+        self.replies_scanned += 1
+        self._scan_message_content(message, location)
+
+    def _scan_message_content(self, message: dict[str, Any], location: str) -> None:
         msg_type = str(message.get("type", "<missing>"))
         self.message_types[msg_type] += 1
         if msg_type != "message":
@@ -147,7 +150,7 @@ class FeatureAudit:
         if isinstance(replies, list):
             for idx, reply in enumerate(replies):
                 if isinstance(reply, dict):
-                    self.scan_message(reply, f"{location}#reply:{idx}", is_reply=True)
+                    self.scan_reply(reply, f"{location}#reply:{idx}")
 
     def has_renderable_content(self, message: dict[str, Any]) -> bool:
         text = message.get("text")
