@@ -379,9 +379,7 @@ class SlackDumpReader:
         blocks = message.get("blocks")
         if not blocks:
             return False
-        return blocks[0]["type"] == "image" and str(blocks[0]["image_url"]).__contains__(
-            "giphy.com"
-        )
+        return blocks[0]["type"] == "image" and "giphy.com" in str(blocks[0]["image_url"])
 
     def get_shared_image_urls(self, message: dict) -> list[str]:
         urls: list[str] = []

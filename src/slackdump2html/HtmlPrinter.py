@@ -26,21 +26,22 @@ class HtmlPrinter:
 
     def print(self):
         title_text = escape(self.slack_data.get_title_text(), quote=True)
-        html1 = "<!DOCTYPE html>\n"
-        html1 += "    <head>\n"
-        html1 += f"        <title>{title_text} chat history</title>\n"
-        html1 += '        <meta charset="UTF-8">'
-        html1 += self.read_css_file()
-        html3 = "    </head>\n"
-        html3 += "    <body>\n"
-        html3 += f"        <h1>{title_text} chat history</h1>\n"
-        html3 += self.print_messages(self.slack_data.messages)
-        # Only print used emojis
-        html2 = self.print_custom_emoji_definitions()
-        html3 += "    </body>\n"
-        html3 += "</html>\n"
+        head_html = "<!DOCTYPE html>\n"
+        head_html += "    <head>\n"
+        head_html += f"        <title>{title_text} chat history</title>\n"
+        head_html += '        <meta charset="UTF-8">'
+        head_html += self.read_css_file()
+        body_html = "    </head>\n"
+        body_html += "    <body>\n"
+        body_html += f"        <h1>{title_text} chat history</h1>\n"
+        body_html += self.print_messages(self.slack_data.messages)
+        # print_messages populates used_custom_emojis, so this style block
+        # must be built after it, even though it belongs before the body.
+        custom_emoji_style_html = self.print_custom_emoji_definitions()
+        body_html += "    </body>\n"
+        body_html += "</html>\n"
 
-        html = html1 + html2 + html3
+        html = head_html + custom_emoji_style_html + body_html
 
         self.write_out_file(html)
 
@@ -111,10 +112,7 @@ class HtmlPrinter:
         )
 
     def calc_color_num(self, user: str) -> int:
-        letter_sum = 0
-        for letter in user:
-            letter_sum += ord(letter)
-        return letter_sum % 15
+        return sum(ord(letter) for letter in user) % 15
 
     # Placeholder for HTML that is rendered up-front and must survive the
     # formatting rules that run over the literal message text.
