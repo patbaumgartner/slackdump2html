@@ -16,6 +16,7 @@ class SlackThreadMessage:
     metadata_event_type: str | None = None
     team_id: str | None = None
     client_msg_id: str | None = None
+    markup: str = ""
 
 
 @dataclass
@@ -35,6 +36,7 @@ class SlackMessage:
     upload: bool = False
     team_id: str | None = None
     client_msg_id: str | None = None
+    markup: str = ""
 
 
 class ChannelType(StrEnum):

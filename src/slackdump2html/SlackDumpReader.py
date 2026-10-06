@@ -5,6 +5,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
+import emoji
+
 from slackdump2html.data_structures import (
     ChannelType,
     SlackData,
@@ -34,10 +36,12 @@ class SlackDumpReader:
             if self.is_renderable_message(message):
                 replies = self.read_replies(message)
                 user_id = self.get_user(message)
+                text, markup = self.get_message_parts(message)
                 messages.append(
                     SlackMessage(
                         user=user_id,
-                        text=self.get_message_content(message),
+                        text=text,
+                        markup=markup,
                         date=self.to_datetime(message["ts"]),
                         reactions=self.read_reactions(message),
                         replies=replies,
@@ -108,16 +112,33 @@ class SlackDumpReader:
 
         return "metadata"
 
+    @staticmethod
+    def escape_card_text(text: str) -> str:
+        """Render emoji aliases in card metadata, then escape it for HTML.
+
+        Card titles and descriptions are Slack text like a message, so emoji
+        aliases are rendered the same way, but the result is trusted HTML and
+        must not be escaped again by the renderer.
+        """
+        return escape(emoji.emojize(text, language="alias"), quote=True)
+
     def get_message_content(self, message: dict) -> str:
+        text, markup = self.get_message_parts(message)
+        return "\n".join(part for part in (text, markup) if part)
+
+    def get_message_parts(self, message: dict) -> tuple[str, str]:
+        """Split a message into raw Slack text and reader-generated markup.
+
+        ``text`` is untrusted dump content and must be escaped by the HTML
+        renderer. ``markup`` (shared images, file cards, attachments) is built
+        from escaped pieces here and must not be escaped again.
+        """
         text = self.get_message_text(message)
         image_urls = self.get_shared_image_urls(message)
         file_markup = self.get_file_markup(message)
         attachment_markup = self.get_attachment_markup(message)
 
         blocks: list[str] = []
-        if text:
-            blocks.append(text)
-
         if image_urls:
             image_markup = "\n".join(
                 (
@@ -138,7 +159,7 @@ class SlackDumpReader:
         if attachment_markup:
             blocks.append(attachment_markup)
 
-        return "\n".join(blocks)
+        return text, "\n".join(blocks)
 
     def get_message_text(self, message: dict) -> str:
         text = message.get("text")
@@ -281,11 +302,14 @@ class SlackDumpReader:
 
             normalized_media_link = self.normalize_media_url(link)
             if self.is_http_url(link):
-                title_html = f'<a href="{escape(str(link), quote=True)}">{escape(title)}</a>'
+                safe_link = escape(str(link), quote=True)
+                title_html = f'<a href="{safe_link}">{self.escape_card_text(title)}</a>'
             else:
-                title_html = escape(title)
+                title_html = self.escape_card_text(title)
 
-            detail_html = f'<p class="file-card-meta">{escape(details)}</p>' if details else ""
+            detail_html = (
+                f'<p class="file-card-meta">{self.escape_card_text(details)}</p>' if details else ""
+            )
             preview_html = self.get_file_preview_markup(file_obj, normalized_media_link)
             entries.append(
                 '<article class="file-card">'
@@ -334,11 +358,14 @@ class SlackDumpReader:
             )
 
             if self.is_http_url(link):
-                title_html = f'<a href="{escape(str(link), quote=True)}">{escape(title)}</a>'
+                safe_link = escape(str(link), quote=True)
+                title_html = f'<a href="{safe_link}">{self.escape_card_text(title)}</a>'
             else:
-                title_html = escape(title)
+                title_html = self.escape_card_text(title)
 
-            text_html = f'<p class="file-card-meta">{escape(text)}</p>' if text else ""
+            text_html = (
+                f'<p class="file-card-meta">{self.escape_card_text(text)}</p>' if text else ""
+            )
             entries.append(
                 '<article class="file-card">'
                 f'<p class="file-card-title">{title_html}</p>'
@@ -418,10 +445,12 @@ class SlackDumpReader:
             for reply in message["slackdump_thread_replies"]:
                 if self.is_renderable_message(reply):
                     user_id = reply.get("user", "Unknown user")
+                    text, markup = self.get_message_parts(reply)
                     replies.append(
                         SlackThreadMessage(
                             user=user_id,
-                            text=self.get_message_content(reply),
+                            text=text,
+                            markup=markup,
                             date=self.to_datetime(reply["ts"]),
                             reactions=self.read_reactions(reply),
                             avatar_url=self.get_avatar_url(reply, user_id),
@@ -471,9 +500,9 @@ class SlackDumpReader:
             emoji_data = json.load(emoji_file)
 
         emojis: dict[str, str] = {}
-        for emoji in emoji_data.items():
-            if not emoji[1].startswith("alias:"):
-                emoji_file_name = self.get_emoji_file_name(emoji[0])
+        for name, value in emoji_data.items():
+            if not value.startswith("alias:"):
+                emoji_file_name = self.get_emoji_file_name(name)
                 if emoji_file_name.startswith("<none>"):
                     continue
 
@@ -481,11 +510,11 @@ class SlackDumpReader:
                     image_data = image.read()
                     image_type = self.get_image_type(image_data)
                     base64_data = base64.encodebytes(image_data).decode("utf-8").replace("\n", "")
-                    emojis[emoji[0]] = image_type + ";base64," + base64_data
+                    emojis[name] = image_type + ";base64," + base64_data
 
-        for emoji in emoji_data.items():
-            if emoji[1].startswith("alias:") and emoji[1][6:] in emojis:
-                emojis[emoji[0]] = emojis[emoji[1][6:]]
+        for name, value in emoji_data.items():
+            if value.startswith("alias:") and value[6:] in emojis:
+                emojis[name] = emojis[value[6:]]
 
         return emojis
 
