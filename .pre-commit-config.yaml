@@ -6,7 +6,8 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2
+    # Keep in sync with the mypy version pinned in uv.lock.
+    rev: v2.1.0
     hooks:
       - id: mypy
         additional_dependencies: []

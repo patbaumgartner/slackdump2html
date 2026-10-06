@@ -8,6 +8,8 @@
 .ruff_cache/
 .venv/
 venv/
+build/
+dist/
 
 # Local IDE and env
 .env

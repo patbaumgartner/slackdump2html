@@ -15,11 +15,15 @@ concurrency:
 jobs:
   checks:
     runs-on: ${{ matrix.os }}
+    env:
+      # .python-version pins local development to 3.13; CI must exercise the
+      # whole supported interpreter range instead.
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.13"]
+        python-version: ["3.13", "3.14"]
 
     steps:
       - name: Checkout
@@ -36,13 +40,17 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Sync dependencies
-        run: uv sync --all-groups
+        run: uv sync --all-groups --locked
 
       - name: Ruff lint
         run: uv run ruff check .
 
       - name: Ruff format check
         run: uv run ruff format --check .
+
+      - name: Shell scripts lint
+        if: runner.os == 'Linux'
+        run: shellcheck -S warning ./*.sh scripts/*.sh
 
       - name: Type check
         run: uv run mypy
@@ -55,3 +63,41 @@ jobs:
 
       - name: Dependency vulnerability audit
         run: uv run pip-audit
+
+  # A wheel can build cleanly and still be unusable (missing package data,
+  # broken entry point), so install what we ship and run it on a real dump.
+  package:
+    name: Package smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Wheel contains the bundled stylesheet
+        run: python -m zipfile -l dist/*.whl | grep -q "styles/style.css"
+
+      - name: Install wheel into a clean environment
+        run: |
+          uv venv "${RUNNER_TEMP}/wheel-smoke"
+          uv pip install --python "${RUNNER_TEMP}/wheel-smoke/bin/python" dist/*.whl
+
+      - name: Convert a fixture dump with the installed CLI
+        run: |
+          "${RUNNER_TEMP}/wheel-smoke/bin/slackdump2html" tests/test_data C2R198BRC
+          ls out/*.html
+          grep -q "white-space: pre-wrap" out/*.html
+          grep -q 'class="message"' out/*.html

@@ -71,6 +71,7 @@ class FeatureAudit:
 
         self.files_scanned += 1
 
+        messages: Any
         if isinstance(data, list):
             messages = data
         elif isinstance(data, dict):
