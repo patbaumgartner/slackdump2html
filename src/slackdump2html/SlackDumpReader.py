@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -311,13 +310,7 @@ class SlackDumpReader:
                 f'<p class="file-card-meta">{self.escape_card_text(details)}</p>' if details else ""
             )
             preview_html = self.get_file_preview_markup(file_obj, normalized_media_link)
-            entries.append(
-                '<article class="file-card">'
-                f'<p class="file-card-title">{title_html}</p>'
-                f"{detail_html}"
-                f"{preview_html}"
-                "</article>"
-            )
+            entries.append(self._render_file_card(title_html, detail_html, preview_html))
 
         return "\n".join(entries)
 
@@ -366,14 +359,19 @@ class SlackDumpReader:
             text_html = (
                 f'<p class="file-card-meta">{self.escape_card_text(text)}</p>' if text else ""
             )
-            entries.append(
-                '<article class="file-card">'
-                f'<p class="file-card-title">{title_html}</p>'
-                f"{text_html}"
-                "</article>"
-            )
+            entries.append(self._render_file_card(title_html, text_html))
 
         return "\n".join(entries)
+
+    @staticmethod
+    def _render_file_card(title_html: str, details_html: str, preview_html: str = "") -> str:
+        return (
+            '<article class="file-card">'
+            f'<p class="file-card-title">{title_html}</p>'
+            f"{details_html}"
+            f"{preview_html}"
+            "</article>"
+        )
 
     def is_gif(self, message: dict) -> bool:
         blocks = message.get("blocks")
@@ -517,16 +515,11 @@ class SlackDumpReader:
         return emojis
 
     def get_emoji_file_name(self, emoji_name: str) -> str:
-        if os.path.exists(EMOJI_PATH + emoji_name + ".gif"):
-            return EMOJI_PATH + emoji_name + ".gif"
-        elif os.path.exists(EMOJI_PATH + emoji_name + ".jpeg"):
-            return EMOJI_PATH + emoji_name + ".jpeg"
-        elif os.path.exists(EMOJI_PATH + emoji_name + ".jpg"):
-            return EMOJI_PATH + emoji_name + ".jpg"
-        elif os.path.exists(EMOJI_PATH + emoji_name + ".png"):
-            return EMOJI_PATH + emoji_name + ".png"
-        else:
-            return "<none>" + emoji_name
+        for extension in (".gif", ".jpeg", ".jpg", ".png"):
+            file_name = EMOJI_PATH + emoji_name + extension
+            if Path(file_name).exists():
+                return file_name
+        return "<none>" + emoji_name
 
     def get_image_type(self, image_data: bytes) -> str:
         if image_data.startswith(bytes("GIF", "utf-8")):

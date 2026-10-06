@@ -39,10 +39,7 @@ trap 'rm -rf "${tmp_root}"' EXIT
 
 "${cmd}" dump -load-env -o "${tmp_out}" "${channel}"
 
-source_file="$(find "${tmp_out}" -type f -name "${channel}.json" | head -n 1)"
-if [[ -z "${source_file}" ]]; then
-	source_file="$(find "${tmp_out}" -type f -name '*.json' | head -n 1)"
-fi
+source_file="$(find_export_file "${tmp_out}" "${channel}")"
 
 if [[ -z "${source_file}" ]]; then
 	fail "Channel dump completed, but no JSON export file was found."

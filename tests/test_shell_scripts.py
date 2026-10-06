@@ -91,3 +91,34 @@ def test_check_auth_vars_rejects_missing_credentials(tmp_path: Path):
 
     assert result.returncode == 1
     assert "SLACK_TOKEN is not set" in result.stderr
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="bash helper scripts")
+def test_find_export_file_prefers_channel_file_and_falls_back(tmp_path: Path):
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    fallback_file = export_dir / "other.json"
+    fallback_file.write_text("{}", encoding="utf-8")
+
+    def find_export_file() -> str:
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'set -euo pipefail; source "$1"; find_export_file "$2" C1',
+                "bash",
+                str(REPO_ROOT / "scripts/lib.sh"),
+                str(export_dir),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    assert find_export_file() == str(fallback_file)
+
+    channel_file = export_dir / "C1.json"
+    channel_file.write_text("{}", encoding="utf-8")
+
+    assert find_export_file() == str(channel_file)

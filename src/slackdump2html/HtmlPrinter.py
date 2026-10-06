@@ -6,8 +6,8 @@ from html import escape
 
 import emoji
 
+from slackdump2html.data_structures import SlackData, SlackMessage, SlackThreadMessage
 from slackdump2html.SlackDataCleaner import SlackDataCleaner
-from slackdump2html.SlackDumpReader import SlackData, SlackMessage, SlackThreadMessage
 
 from . import styles
 
