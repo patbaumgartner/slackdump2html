@@ -25,14 +25,15 @@ class HtmlPrinter:
         self.data_cleaner = SlackDataCleaner()
 
     def print(self):
+        title_text = escape(self.slack_data.get_title_text(), quote=True)
         html1 = "<!DOCTYPE html>\n"
         html1 += "    <head>\n"
-        html1 += f"        <title>{self.slack_data.get_title_text()} chat history</title>\n"
+        html1 += f"        <title>{title_text} chat history</title>\n"
         html1 += '        <meta charset="UTF-8">'
         html1 += self.read_css_file()
         html3 = "    </head>\n"
         html3 += "    <body>\n"
-        html3 += f"        <h1>{self.slack_data.get_title_text()} chat history</h1>\n"
+        html3 += f"        <h1>{title_text} chat history</h1>\n"
         html3 += self.print_messages(self.slack_data.messages)
         # Only print used emojis
         html2 = self.print_custom_emoji_definitions()
@@ -90,7 +91,7 @@ class HtmlPrinter:
         )
         html += f'                <span class="date">{self.to_time(message.date)}</span>\n'
         html += "            </p>\n"
-        html += f'            <p class="message">{self.format_message(message.text)}</p>\n'
+        html += f'            <p class="message">{self.message_body(message)}</p>\n'
         html += self.print_reactions(message.reactions, message.reaction_users)
         html += self.print_replies(message)
         html += "        </div>\n"
@@ -103,11 +104,8 @@ class HtmlPrinter:
                 f'<img src="{escape(avatar_url, quote=True)}" alt="{escape(user)}" '
                 'class="user-avatar-img"></div>\n'
             )
-        if " " in user:
-            parts = user.split(" ")
-            name = parts[0][0].upper() + parts[1][0].upper()
-        else:
-            name = user[0].upper()
+        parts = user.split()
+        name = "".join(part[0] for part in parts[:2]).upper() if parts else "?"
         return (
             f'            <div class="user-image color{self.calc_color_num(user)}">{name}</div>\n'
         )
@@ -118,76 +116,138 @@ class HtmlPrinter:
             letter_sum += ord(letter)
         return letter_sum % 15
 
+    # Placeholder for HTML that is rendered up-front and must survive the
+    # formatting rules that run over the literal message text.
+    _TOKEN = re.compile(r"\x00(\d+)\x00")
+
+    def message_body(self, message: SlackMessage | SlackThreadMessage) -> str:
+        """Render a message body: escaped Slack text plus reader markup.
+
+        ``message.text`` is dump content and goes through ``format_message``,
+        which escapes it. ``message.markup`` (shared images, file cards) is
+        trusted HTML built by the reader and is inserted as is.
+        """
+        body = self.format_message(message.text)
+        if not message.markup:
+            return body
+        if body:
+            body += "<br>"
+        return body + message.markup.replace("\n", "<br>")
+
     def format_message(self, text: str) -> str:
-        text = text.replace("<!here>", '<span class="user-mention">here</span>')
-        text = text.replace("<!channel>", '<span class="user-mention">channel</span>')
-        text = re.sub(r"<(http.*?)\|(.*?)>", self.create_html_url_with_alias, text)
-        text = re.sub(r"<(http.*?)>", self.create_html_url, text)
-        text = re.sub(r"<(img .*?)>", self.create_html_img, text)
-        text = re.sub(r"<@(.*?)>", self.create_at_tag, text)
-        text = re.sub(r"<#.*\|(.*?)>", self.create_channel_tag_with_alias, text)
+        """Render Slack mrkdwn text into HTML that is safe to publish.
+
+        Slack markup tokens and fenced code blocks are rendered first and
+        stashed, everything else is HTML-escaped, and only then are the
+        inline rules applied. The stashed HTML is restored last, so no rule
+        can rewrite generated markup and no dump content reaches the output
+        unescaped.
+        """
+        rendered: list[str] = []
+
+        def stash(html: str) -> str:
+            rendered.append(html)
+            return f"\x00{len(rendered) - 1}\x00"
+
+        # 1. Fenced code blocks keep their content literal.
+        text = re.sub(
+            r"```(.*?)```",
+            lambda match: stash(self.make_code(match.group(1))),
+            text,
+            flags=re.DOTALL,
+        )
+
+        # 2. Slack markup tokens become HTML with per-context escaping.
+        text = re.sub(r"<!here>", lambda _match: stash(self.make_broadcast("here")), text)
+        text = re.sub(r"<!channel>", lambda _match: stash(self.make_broadcast("channel")), text)
+        text = re.sub(
+            r"<(http[^<>\s]*)\|([^<>]*)>",
+            lambda match: stash(self.create_html_url(match.group(1), match.group(2))),
+            text,
+        )
+        text = re.sub(
+            r"<(http[^<>\s]*)>",
+            lambda match: stash(self.create_html_url(match.group(1))),
+            text,
+        )
+        text = re.sub(
+            r"<@([^<>]*)>",
+            lambda match: stash(self.create_at_tag(match.group(1))),
+            text,
+        )
+        text = re.sub(
+            r"<#[^<>|]*\|([^<>]*)>",
+            lambda match: stash(self.create_channel_tag(match.group(1))),
+            text,
+        )
+
+        # 3. Whatever is left is literal message text and gets escaped.
+        text = escape(text, quote=True)
+
+        # 4. Inline formatting, applied to literal text only.
         text = re.sub(r"\*([^\"\n]+?)\*", self.make_bold, text)
         text = re.sub(r":([\w+-]+?)::skin-tone-(\d):", self.replace_emoji_with_skin_tone, text)
         text = re.sub(r":([\w+-]+?):", self.replace_emoji, text)
-        text = re.sub(r"```(.*)```", self.make_code, text, flags=re.DOTALL)
         text = text.replace("\n", "<br>")
         text = emoji.emojize(text, language="alias")
-        # TODO Emoji codes in links are translated to emojis which breaks these links
-        return text
 
-    def create_html_url_with_alias(self, match_obj):
-        if match_obj.group(1) is not None and match_obj.group(2) is not None:
-            url = match_obj.group(1)
-            alias = match_obj.group(2)
-            if self.is_image_url(url):
-                safe_url = escape(url, quote=True)
-                safe_alias = escape(alias)
-                return (
-                    f'<a href="{safe_url}">{safe_alias}</a>'
-                    f'<br><img src="{safe_url}" alt="{safe_alias}" class="shared-image-img">'
-                )
-            return f'<a href="{url}">{alias}</a>'
+        # 5. Restore the pre-rendered HTML.
+        return self._TOKEN.sub(lambda match: rendered[int(match.group(1))], text)
 
-    def create_html_url(self, match_obj):
-        if match_obj.group(1) is not None:
-            url = match_obj.group(1)
-            if self.is_image_url(url):
-                safe_url = escape(url, quote=True)
-                return (
-                    f'<a href="{safe_url}">{safe_url}</a>'
-                    f'<br><img src="{safe_url}" alt="Shared image" class="shared-image-img">'
-                )
-            return f'<a href="{url}">{url}</a>'
+    @staticmethod
+    def make_bold(match_obj) -> str:
+        if match_obj.group(1) is None:
+            return match_obj.group(0)
+        return f"<b>{match_obj.group(1)}</b>"
+
+    @staticmethod
+    def make_code(code: str) -> str:
+        return f"<code>{escape(code, quote=True).replace(chr(10), '<br>')}</code>"
+
+    @staticmethod
+    def make_broadcast(kind: str) -> str:
+        return f'<span class="user-mention">{escape(kind, quote=True)}</span>'
+
+    def create_html_url(self, url: str, alias: str | None = None) -> str:
+        safe_url = escape(url, quote=True)
+        raw_label = alias if alias is not None else url
+        plain_label = escape(raw_label, quote=True)
+        label = self.render_label(raw_label)
+        if self.is_image_url(url):
+            return (
+                f'<a href="{safe_url}">{label}</a>'
+                f'<br><img src="{safe_url}" alt="{plain_label}" class="shared-image-img">'
+            )
+        return f'<a href="{safe_url}">{label}</a>'
+
+    def render_label(self, text: str) -> str:
+        """Render a link label: escaped text plus emoji aliases, nothing else.
+
+        The label is rendered before the message text is escaped, so it must
+        escape itself. Emoji aliases render the way they do in message text;
+        other formatting (``*bold*``) is deliberately not applied to link
+        text, and the ``href`` is never touched here.
+        """
+        escaped = escape(text, quote=True)
+        escaped = re.sub(
+            r":([\w+-]+?)::skin-tone-(\d):",
+            self.replace_emoji_with_skin_tone,
+            escaped,
+        )
+        escaped = re.sub(r":([\w+-]+?):", self.replace_emoji, escaped)
+        return emoji.emojize(escaped, language="alias")
+
+    def create_at_tag(self, user: str) -> str:
+        display_name = self.data_cleaner.user_map.get(user, user)
+        return f'<span class="user-mention">{escape(display_name, quote=True)}</span>'
+
+    @staticmethod
+    def create_channel_tag(channel_name: str) -> str:
+        return f'<span class="channel-mention">{escape(channel_name, quote=True)}</span>'
 
     def is_image_url(self, url: str) -> bool:
         lowered = url.lower().split("?", 1)[0]
         return lowered.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
-
-    def create_html_img(self, match_obj):
-        if match_obj.group(1) is not None:
-            return f"<{match_obj.group(1)}>"
-
-    def create_at_tag(self, match_obj):
-        if match_obj.group(1) is not None:
-            user = match_obj.group(1)
-            if user in self.data_cleaner.user_map:
-                user = self.data_cleaner.user_map[user]
-            return f'<span class="user-mention">{user}</span>'
-
-    def create_channel_tag_with_alias(self, match_obj):
-        if match_obj.group(1) is not None:
-            return f'<span class="channel-mention">{match_obj.group(1)}</span>'
-
-    def make_bold(self, match_obj):
-        if match_obj.group(1) is not None:
-            return f"<b>{match_obj.group(1)}</b>"
-
-    def make_code(self, match_obj):
-        if match_obj.group(1) is not None:
-            code = match_obj.group(1)
-            code = code.replace("<", "&lt;")
-            code = code.replace(">", "&gt;")
-            return f"<code>{code}</code>"
 
     def replace_emoji(self, match_obj):
         emoji_name = match_obj.group(1)
@@ -227,15 +287,34 @@ class HtmlPrinter:
             html += "            </ul>\n"
         return html
 
-    def get_custom_emoji_html(self, emoji_name: str):
+    def get_custom_emoji_html(self, emoji_name: str) -> str:
         if emoji_name in self.slack_data.emojis:
             self.used_custom_emojis.add(emoji_name)
-            return f'<i class="emoji emoji-{emoji_name}"></i>'
-        else:
-            return emoji.emojize(
+            return f'<i class="emoji emoji-{self.emoji_class_name(emoji_name)}"></i>'
+        return escape(
+            emoji.emojize(
                 f":{self.data_cleaner.replace_emoji_name(emoji_name)}:",
                 language="alias",
-            )
+            ),
+            quote=True,
+        )
+
+    @staticmethod
+    def emoji_class_name(emoji_name: str) -> str:
+        """Map an emoji name onto a CSS/HTML class fragment that cannot escape
+        the class attribute or the generated stylesheet."""
+        return re.sub(r"[^\w+-]", "_", emoji_name, flags=re.ASCII) or "_"
+
+    @staticmethod
+    def safe_data_url(data: str) -> bool:
+        """Only allow base64 image data URIs into the generated stylesheet."""
+        return bool(re.fullmatch(r"image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+", data, re.ASCII))
+
+    @staticmethod
+    def safe_output_name(channel_name: str) -> str:
+        """Derive a portable output file name from a (possibly hostile) name."""
+        safe = re.sub(r"[^\w.-]", "_", channel_name).strip(".")
+        return safe or "channel"
 
     def print_replies(self, message: SlackMessage) -> str:
         html = ""
@@ -264,16 +343,19 @@ class HtmlPrinter:
             f'		                <span class="date">{self.to_datetime(reply.date)}</span>\n'
         )
         html += "		            </p>\n"
-        html += f'		            <p class="message">{self.format_message(reply.text)}</p>\n'
+        html += f'		            <p class="message">{self.message_body(reply)}</p>\n'
         html += self.print_reactions(reply.reactions, reply.reaction_users)
         html += "		        </div>\n"
         return html
 
     def print_custom_emoji_definitions(self) -> str:
         html = '      <style type="text/css">\n'
-        for emoji_name in self.used_custom_emojis:
-            html += f"        .emoji-{emoji_name} {{\n"
-            html += f'          background-image: url("data:{self.slack_data.emojis[emoji_name]}");'
+        for emoji_name in sorted(self.used_custom_emojis):
+            data = self.slack_data.emojis[emoji_name]
+            if not self.safe_data_url(data):
+                continue
+            html += f"        .emoji-{self.emoji_class_name(emoji_name)} {{\n"
+            html += f'          background-image: url("data:{data}");'
             html += "        }\n"
         html += "      </style>\n"
         return html
@@ -334,7 +416,7 @@ class HtmlPrinter:
 
     def write_out_file(self, html: str):
         os.makedirs("out", exist_ok=True)
-        file_name = f"out/{self.slack_data.channel_name}.html"
+        file_name = f"out/{self.safe_output_name(self.slack_data.channel_name)}.html"
         with open(file_name, "w", encoding="utf-8") as html_file:
             html_file.write(html)
         print(f"{file_name} successfully written")
