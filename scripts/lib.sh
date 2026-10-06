@@ -51,6 +51,9 @@ check_auth_vars() {
   if [[ -z "${SLACK_COOKIE:-}" ]]; then
     fail "SLACK_COOKIE (or COOKIE) is not set. Add it in .env (see .env.example)."
   fi
+  # Exported so slackdump can pick them up via -load-env regardless of the
+  # working directory, instead of receiving them as command line arguments.
+  export SLACK_TOKEN SLACK_COOKIE
 }
 
 ensure_workspace() {
@@ -63,11 +66,10 @@ ensure_workspace() {
     return
   fi
 
-  local cookie_source
-  cookie_source="${COOKIE:-${SLACK_COOKIE:-}}"
-
   log "No slackdump workspace configured. Creating default workspace..."
-  "${SLACKDUMP_BIN}" workspace new -token "${SLACK_TOKEN}" -cookie "${cookie_source}" default >/dev/null
+  # Secrets are read from the environment/.env, never from argv: command line
+  # arguments are visible to other users on the same machine.
+  "${SLACKDUMP_BIN}" workspace new -load-env default >/dev/null
 }
 
 slackdump_cmd() {

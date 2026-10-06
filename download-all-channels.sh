@@ -14,7 +14,12 @@ if [[ ! -f "${channels_file}" ]]; then
   "${cmd}" list channels -load-env -no-json >"${channels_file}"
 fi
 
-mapfile -t channel_ids < <(awk 'NR > 1 {print $1}' "${channels_file}" | grep -E '^[CGP][A-Z0-9]+$' || true)
+# Read the channel IDs without mapfile, which needs bash 4: the script also
+# runs on macOS, where /bin/bash is still 3.2.
+channel_ids=()
+while IFS= read -r raw_id; do
+  channel_ids+=("${raw_id}")
+done < <(awk 'NR > 1 {print $1}' "${channels_file}" | grep -E '^[CGP][A-Z0-9]+$' || true)
 
 if [[ ${#channel_ids[@]} -eq 0 ]]; then
   fail "No channel IDs found in ${channels_file}."
