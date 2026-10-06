@@ -2,11 +2,20 @@
 
 ## Questions and help
 
-Use GitHub Discussions if enabled, otherwise open a `question` issue.
+Open a `question` issue using the question template.
 
 ## Bug reports
 
-Open a bug report using the bug template and include reproduction steps.
+Open a bug report using the bug template and include:
+
+- Steps to reproduce
+- Expected behavior
+- Actual behavior
+- Environment details (OS, Python, project version)
+
+## Feature requests
+
+Open a feature request using the feature request template.
 
 ## Security issues
 

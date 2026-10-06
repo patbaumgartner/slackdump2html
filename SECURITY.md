@@ -2,7 +2,8 @@
 
 ## Supported Versions
 
-Only the latest release on `main` is supported for security updates.
+Security fixes are applied to the default branch (`main`). There are no
+versioned releases yet, so only the current code on `main` is supported.
 
 ## Reporting a Vulnerability
 
