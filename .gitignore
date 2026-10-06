@@ -17,6 +17,7 @@ venv/
 # Project outputs and local data
 data/
 out/
+testdata/
 cov.xml
 C03HQM5DE*
 C2R198BRC*
