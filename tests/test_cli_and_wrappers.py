@@ -1,4 +1,6 @@
+import re
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 
@@ -89,3 +91,95 @@ def test_module_main_invokes_cli_main(monkeypatch):
     runpy.run_module("slackdump2html.__main__", run_name="__main__")
 
     assert called["value"] is True
+
+
+def test_usage_error_exits_2_with_usage_on_stderr(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "error: Please provide an export folder and a channel ID." in captured.err
+    assert "usage: slackdump2html <export-folder> <channel-id>" in captured.err
+    assert captured.out == ""
+
+
+def test_missing_export_folder_exits_2(monkeypatch, capsys, tmp_path: Path):
+    monkeypatch.setattr(sys, "argv", ["prog", str(tmp_path / "nope"), "C1"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 2
+    assert "existing export folder" in capsys.readouterr().err
+
+
+def test_help_exits_0_with_description(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["prog", "--help"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: slackdump2html" in captured.out
+    assert "self-contained HTML" in captured.out
+
+
+def test_version_exits_0(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["prog", "--version"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 0
+    assert re.match(r"slackdump2html \d+\.\d+", capsys.readouterr().out.strip())
+
+
+def test_missing_channel_file_exits_1_without_traceback(monkeypatch, capsys, tmp_path: Path):
+    monkeypatch.setattr(sys, "argv", ["prog", str(tmp_path), "CNOPE"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 1
+    captured = capsys.readouterr()
+    assert f"export file not found: {tmp_path}/CNOPE.json" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_malformed_json_exits_1(monkeypatch, capsys, tmp_path: Path):
+    (tmp_path / "C1.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["prog", str(tmp_path), "C1"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 1
+    assert "is not valid JSON" in capsys.readouterr().err
+
+
+def test_wrong_json_shape_exits_1(monkeypatch, capsys, tmp_path: Path):
+    (tmp_path / "C1.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["prog", str(tmp_path), "C1"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 1
+    assert "does not look like a slackdump export" in capsys.readouterr().err
+
+
+def test_cli_reports_usage_errors_without_a_traceback():
+    result = subprocess.run(
+        [sys.executable, "-m", "slackdump2html"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
+    assert "usage: slackdump2html" in result.stderr
