@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/patbaumgartner/slackdump2html/actions/workflows/ci.yml/badge.svg)](https://github.com/patbaumgartner/slackdump2html/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/patbaumgartner/slackdump2html/actions/workflows/codeql.yml/badge.svg)](https://github.com/patbaumgartner/slackdump2html/actions/workflows/codeql.yml)
-[![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.md)
 [![Release](https://img.shields.io/github/v/release/patbaumgartner/slackdump2html)](https://github.com/patbaumgartner/slackdump2html/releases)
 
@@ -174,10 +174,14 @@ Use the `data/channels.txt` file to get the ID of your channel (e.g. `C03HQM5DE`
 Grab a coffee, this might take a while.
 
 ```bash
-./slackdump -download -base data/messages <your-channel-id>
+./slackdump dump -o data/messages <your-channel-id>
 -- or
-./slackdump -download -base data/messages C03HQM5DE
+./slackdump dump -o data/messages C03HQM5DE
 ```
+
+`slackdump` takes its credentials from an already authenticated workspace
+(`./slackdump workspace new`) or, when you pass `-load-env`, from a `.env`
+file in the current directory.
 
 Convert your `slackdump` to an HTML file with this command.
 
@@ -189,10 +193,13 @@ slackdump2html data/messages C03HQM5DE
 
 You'll find your output file in `out/<channel-name>.html`.
 
+Run `slackdump2html --help` for a usage summary and `slackdump2html --version`
+for the installed version. Invalid usage exits with code 2, runtime problems
+(for example a missing or malformed export file) exit with code 1.
+
 ## Known issues
 
 * Emojis:
-  * The Python `emoji` package does not consider markup languages and replaces emojis in HTML links. This might break some of your links.
   * Not all emojis can be replaced correctly.
   * Not all image types are supported as custom emojis.
 
@@ -201,12 +208,12 @@ You'll find your output file in `out/<channel-name>.html`.
   * Inline previews currently focus on images, video (`video/*`), and PDF (`application/pdf`).
   * Some file types still render as links/cards only.
 
-* Code blocks:
-  * Some formatting in code blocks is broken.
+* Timestamps:
+  * Message times are rendered in the time zone of the machine running the conversion, so the same dump converted in two time zones shows different times.
 
 * EZ-Login 3000 in `slackdump` might not work in Linux/WSL:
-  * Define a `.env` file with a `SLACK_TOKEN=xoxc-...` and `COOKIE=./app.slack.com_cookies.txt` variable.
-  * Or pass the via command line arguments `-t xoxc-... -cookie ./app.slack.com_cookies.txt`
+  * Define a `.env` file with a `SLACK_TOKEN=xoxc-...` and `SLACK_COOKIE=...` variable (the helper scripts also accept `COOKIE=` as an alias).
+  * Pass `-load-env` to `slackdump`, for example `./slackdump dump -load-env -o data/messages C03HQM5DE`, so the secrets are read from the file instead of the command line. Command line arguments are visible to other users on the same machine.
 
 ## Contributing
 
