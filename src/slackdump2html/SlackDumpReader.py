@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from urllib.parse import urlparse
 
 import emoji
 
@@ -377,7 +378,10 @@ class SlackDumpReader:
         blocks = message.get("blocks")
         if not blocks:
             return False
-        return blocks[0]["type"] == "image" and "giphy.com" in str(blocks[0]["image_url"])
+        if blocks[0]["type"] != "image":
+            return False
+        image_url = str(blocks[0].get("image_url") or "")
+        return urlparse(image_url).netloc.lower().endswith("giphy.com")
 
     def get_shared_image_urls(self, message: dict) -> list[str]:
         urls: list[str] = []
